@@ -29,6 +29,8 @@ type
   private
     FOnScriptError: TScriptErrorEvent;
     FExceptionOnError: Boolean;
+    FLanguage: string;
+    procedure SetLanguage(const Value: string);
     { Private declarations }
   protected
     { Protected declarations }
@@ -63,10 +65,11 @@ type
     ScriptSite: TScriptSite;
     Script: IActiveScript;
     ScriptParse: IActiveScriptParse;
-    FGlobalObjects: TDictionary<string, IDispatch>;
+    FGlobalObjects: TDictionary<string, {IDispatch}Pointer>;
     procedure CreateEngine();
     procedure ReleaseEngine();
   public const
+    DefaultLanguage = 'JScript';
     // Hardcode for now
     CLSID_VBScript: TGUID = '{b54f3741-5b07-11cf-a4b0-00aa004a55e8}';
     CLSID_JScript: TGUID = '{f414c260-6ac0-11cf-b6d1-00aa00bbbb58}';
@@ -84,6 +87,7 @@ type
   published
     { Published declarations }
     property ExceptionOnError: Boolean read FExceptionOnError write FExceptionOnError default True;
+    property Language: string read FLanguage write SetLanguage;  // Ignored for now
     property OnScriptError: TScriptErrorEvent read FOnScriptError write FOnScriptError;
   end;
 
@@ -125,13 +129,14 @@ end;
 function TActiveScript.TScriptSite.GetItemInfo(pstrName: PWideChar;
   dwReturnMask: LongWord; {out} ppiunkItem, ppti: {PUnknown}PPointer): HResult;
 var
-  d: IDispatch;
+  d: Pointer; //IDispatch;
 begin
   if not FOwner.FGlobalObjects.TryGetValue(pstrName, d) then
     Exit(TYPE_E_ELEMENTNOTFOUND);
 
   if (dwReturnMask and SCRIPTINFO_IUNKNOWN) <> 0 then
   begin
+    IDispatch(d)._AddRef();
     ppiunkItem^ := d;
   end;
   if (dwReturnMask and SCRIPTINFO_ITYPEINFO) <> 0 then
@@ -194,15 +199,17 @@ end;
 procedure TActiveScript.AddObject(const Name: string; const Object_: IDispatch;
   AddMembers: Boolean);
 begin
-  FGlobalObjects.AddOrSetValue(Name, Object_);
-  Script.AddNamedItem(PChar(Name), SCRIPTITEM_ISVISIBLE or SCRIPTITEM_ISPERSISTENT or IfThen(AddMembers, SCRIPTITEM_GLOBALMEMBERS,0));
+  FGlobalObjects.AddOrSetValue(Name, Pointer(Object_));
+  if Script.AddNamedItem(PChar(Name), SCRIPTITEM_ISVISIBLE {or SCRIPTITEM_ISPERSISTENT} or IfThen(AddMembers, SCRIPTITEM_GLOBALMEMBERS,0)) <> S_OK then
+    RaiseLastOSError();
 end;
 
 constructor TActiveScript.Create(AOwner: TComponent);
 begin
   inherited;
   FExceptionOnError := True;
-  FGlobalObjects := TDictionary<string, IDispatch>.Create();
+  FLanguage := DefaultLanguage;
+  FGlobalObjects := TDictionary<string, {IDispatch}Pointer>.Create();
 
   CreateEngine();
 end;
@@ -262,6 +269,15 @@ begin
   ReleaseEngine();
   FGlobalObjects.Clear();
   CreateEngine();
+end;
+
+procedure TActiveScript.SetLanguage(const Value: string);
+begin
+  if FLanguage <> Value then
+  begin
+    FLanguage := Value;
+    // TODO: Find CLSID for Language
+  end;
 end;
 
 { EActiveScriptException }
