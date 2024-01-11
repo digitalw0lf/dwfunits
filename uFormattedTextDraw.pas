@@ -67,10 +67,34 @@ function GenImgTag(Func:pointer; const Params:AnsiString; Width:integer=0; Heigh
 // Отрисовка форматированного текста.
 procedure DrawFmtText(Canvas:tCanvas; aRect:tRect; const Text:string; {out} CalcRect:pRect=nil; Flags:tFmtTextFlags=[]);
 
+function RemoveTags(const Text: string): string;
+
 var
   PictCache: tPictCache = nil;
 
 implementation
+
+function RemoveTags(const Text: string): string;
+var
+  i, j, Level: Integer;
+  C: Char;
+begin
+  SetLength(Result, Length(Text));
+  Level := 0;
+  j := 1;
+  for i := 1 to Length(Text) do
+  begin
+    C := Text[i];
+    if C = '<' then Inc(Level);
+    if Level = 0 then
+    begin
+      Result[j] := C;
+      Inc(j);
+    end;
+    if C = '>' then Dec(Level);
+  end;
+  SetLength(Result, j - 1);
+end;
 
 function GenImgTag(Pict:TGraphic; Width:integer=0; Height:integer=0):AnsiString; overload;
 // Тэг для вставки заданной картинки в форматированный текст
