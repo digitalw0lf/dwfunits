@@ -19,8 +19,8 @@ uses
   uFormattedTextDraw;
 
 type
-  // ¬сплывающа€ подсказка, отображающа€ форматированный текст при помощи DrawFmtText()
-  // ¬ программе надо использовать глобальный FmtHint и его FmtHint.ShowHint()
+  // Popup hint displaying formatted text using DrawFmtText().
+  // Use global FmtHint variable and its FmtHint.ShowHint() to display a hint.
   tFmtHintWindow = class(THintWindow)
   protected
     FmtText:string;
@@ -100,6 +100,41 @@ type
     property Control: TWinControl read FControl write SetControl;
     property Enabled: Boolean read FEnabled write SetEnabled default True;
     property OnDropFiles: TDropFilesEvent read FOnDropFiles write SetOnDropFiles;
+  end;
+
+  // Keeps parent form at a fixed position relative to main form's corners when
+  // main form moves or resizes
+  TFormSnap = class(TComponent)
+  public type
+    TSnapCorner = (None, TopLeft, TopRight, BottomLeft, BottomRight);
+  protected
+    FForm: TForm;
+//    FFormHandle: HWND;
+    FSnapTo: TWinControl;
+//    FSnapToHandle, FSnapToParentHandle: HWND;
+    FSnapCorner: TSnapCorner;
+    FRelPos: TPoint;
+    FPrevSnapPos, FPrevFormPos: TPoint;
+//    FAppEvents: TApplicationEvents;
+    FTimer: TTimer;
+//    FHostMoved: Boolean;
+    FLockUpdates: Integer;
+    procedure SetForm(const Value: TForm);
+    procedure SetSnapTo(const Value: TWinControl);
+//    procedure AppEventsMessage(var Msg: TMsg; var Handled: Boolean);
+    procedure TimerTimer(Sender: TObject);
+    function GetCornerPos(Control: TControl; Corner: TSnapCorner): TPoint;
+    procedure SaveRelPos();
+    procedure UpdatePosition();
+    function Configured(): Boolean;
+    function GetSnapped: Boolean;
+  public
+    constructor Create(AOwner: TComponent); override;
+    destructor Destroy; override;
+    property Snapped: Boolean read GetSnapped;
+  published
+    property Form: TForm read FForm write SetForm;
+    property SnapTo: TWinControl read FSnapTo write SetSnapTo;
   end;
 
   TScrollEvent64 = procedure(Sender: TObject; ScrollCode: TScrollCode;
@@ -216,7 +251,7 @@ uses
 
 procedure Register;
 begin
-  RegisterComponents('DWF', [THintedImageProxy, TScrollBar64, TDropFileCatcher]);
+  RegisterComponents('DWF', [THintedImageProxy, TScrollBar64, TDropFileCatcher, TFormSnap]);
 end;
 
 procedure PopupFromControl(Menu:tPopupMenu; Control:tControl);
@@ -1099,6 +1134,201 @@ end;
 procedure TScrollBar64.WMEraseBkgnd(var Message: TWMEraseBkgnd);
 begin
   DefaultHandler(Message);
+end;
+
+{ TFormSnap }
+
+//procedure TFormSnap.AppEventsMessage(var Msg: TMsg;
+//  var Handled: Boolean);
+//begin
+//  if (Form = nil) or (SnapTo = nil) then Exit;
+//  if FLockUpdates = 0 then
+//  begin
+//    if ((Msg.hwnd = FSnapToHandle) or (Msg.hwnd = FSnapToParentHandle)) and (
+//       (Msg.message = WM_MOVE) or (Msg.message = WM_SIZE)) then
+//      FHostMoved := True;
+//    if Msg.hwnd = FFormHandle then
+//    begin
+//      Handled := Handled;
+//    end;
+//    if Msg.message = WM_MOVE then
+//    begin
+//      Handled := Handled;
+//    end;
+//    if (Msg.hwnd = FFormHandle) and (Msg.message = WM_MOVE) then
+//      SaveRelPos();
+//  end;
+//end;
+
+constructor TFormSnap.Create(AOwner: TComponent);
+begin
+  inherited;
+  if AOwner is TForm then
+    Form := AOwner as TForm;
+  SnapTo := Application.MainForm;
+  if not (csDesigning in ComponentState) then
+  begin
+//    FAppEvents := TApplicationEvents.Create(AOwner);
+//    FAppEvents.OnMessage := AppEventsMessage;
+    FTimer := TTimer.Create(AOwner);
+    FTimer.Interval := 50;
+    FTimer.OnTimer := TimerTimer;
+  end;
+end;
+
+function TFormSnap.Configured: Boolean;
+begin
+  Result := (Form <> nil) and (SnapTo <> nil);
+end;
+
+destructor TFormSnap.Destroy;
+begin
+
+  inherited;
+end;
+
+function TFormSnap.GetCornerPos(Control: TControl;
+  Corner: TSnapCorner): TPoint;
+// Get an absolute screen position of a given corner of a control
+var
+  R: TRect;
+begin
+  R := Control.BoundsRect;
+  if Control.Parent <> nil then
+    R := Control.Parent.ClientToScreen(R);
+  case Corner of
+    TSnapCorner.TopLeft:     Result := R.TopLeft;
+    TSnapCorner.TopRight:    Result := Point(R.Right, R.Top);
+    TSnapCorner.BottomLeft:  Result := Point(R.Left, R.Bottom);
+    TSnapCorner.BottomRight: Result := R.BottomRight;
+  end;
+end;
+
+function TFormSnap.GetSnapped: Boolean;
+begin
+  Result := (FSnapCorner <> TSnapCorner.None);
+end;
+
+procedure TFormSnap.SaveRelPos;
+// Select a snap corner and save current position relative to this corner
+//const
+//  SNAP_DIST = 6;
+var
+  Center, HostCenter: TPoint;
+  HostForm: TCustomForm;
+  HostFormRect: TRect;
+  Corner: TSnapCorner;
+begin
+  if not Configured() then Exit;
+  Center := Form.ClientToScreen(Point(Form.Width div 2, Form.Height div 2));
+  HostCenter := SnapTo.ClientToScreen(Point(SnapTo.Width div 2, SnapTo.Height div 2));
+  HostForm := GetParentForm(SnapTo);
+  HostFormRect := HostForm.ClientToScreen(HostForm.ClientRect);
+
+  if HostFormRect.Contains(Center) then
+  begin
+    // Select a corner to which we are closer
+    if Center.X < HostCenter.X then
+    begin
+      if Center.Y < HostCenter.Y then
+        Corner := TSnapCorner.TopLeft
+      else
+        Corner := TSnapCorner.BottomLeft;
+    end
+    else
+    begin
+      if Center.Y < HostCenter.Y then
+        Corner := TSnapCorner.TopRight
+      else
+        Corner := TSnapCorner.BottomRight;
+    end;
+    // Save relative position
+    FSnapCorner := Corner;
+    FRelPos := GetCornerPos(Form, Corner).Subtract(GetCornerPos(SnapTo, Corner));
+//    var Snap: Boolean := False;
+//    if (Abs(FRelPos.X) <= SNAP_DIST) then
+//    begin
+//      Snap := True;
+//      FRelPos.X := 0;
+//    end;
+//    if (Abs(FRelPos.Y) <= SNAP_DIST) then
+//    begin
+//      Snap := True;
+//      FRelPos.Y := 0;
+//    end;
+//    if Snap then
+//    begin
+//      UpdatePosition();
+//    end;
+  end
+  else
+  begin
+    // Moved outside of a main window -> unsnap
+    FSnapCorner := TSnapCorner.None;
+  end;
+end;
+
+procedure TFormSnap.SetForm(const Value: TForm);
+begin
+  if Value <> FForm then
+  begin
+    FForm := Value;
+//    FFormHandle := FForm.Handle;
+  end;
+end;
+
+procedure TFormSnap.SetSnapTo(const Value: TWinControl);
+begin
+  if Value <> FSnapTo then
+  begin
+    FSnapTo := Value;
+//    FSnapToHandle := FSnapTo.Handle;
+//    FSnapToParentHandle := GetParentForm(FSnapTo).Handle;
+  end;
+end;
+
+procedure TFormSnap.TimerTimer(Sender: TObject);
+var
+  FormPos, SnapPos: TPoint;
+begin
+  if not Configured() then Exit;
+
+  SnapPos := GetCornerPos(SnapTo, FSnapCorner);
+
+  // Save new relative position if form moved by user
+  FormPos := Point(Form.Left, Form.Top);
+  if FormPos <> FPrevFormPos then
+  begin
+    SaveRelPos();
+    FPrevFormPos := Point(Form.Left, Form.Top);
+  end
+  else
+  // Adjust form position if host control moved/resized
+  if (Snapped) and {(FHostMoved)} (SnapPos <> FPrevSnapPos) then
+  begin
+    UpdatePosition();
+  end;
+  FPrevSnapPos := SnapPos;
+end;
+
+procedure TFormSnap.UpdatePosition;
+// Move our form if snap host moved or resized
+var
+  ARelPos: TPoint;
+begin
+  ARelPos := GetCornerPos(Form, FSnapCorner).Subtract(GetCornerPos(SnapTo, FSnapCorner));
+  if (ARelPos <> FRelPos) then
+  begin
+    Inc(FLockUpdates);
+    try
+      Form.SetBounds(Form.Left - (ARelPos.X - FRelPos.X), Form.Top - (ARelPos.Y - FRelPos.Y),
+                     Form.Width, Form.Height);
+      FPrevFormPos := Point(Form.Left, Form.Top);
+    finally
+      Dec(FLockUpdates);
+    end;
+  end;
+
 end;
 
 end.
