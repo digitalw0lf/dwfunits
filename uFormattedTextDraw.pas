@@ -68,6 +68,7 @@ function GenImgTag(Func:pointer; const Params:AnsiString; Width:integer=0; Heigh
 procedure DrawFmtText(Canvas:tCanvas; aRect:tRect; const Text:string; {out} CalcRect:pRect=nil; Flags:tFmtTextFlags=[]);
 
 function RemoveTags(const Text: string): string;
+function GetNextWord(var P:PWideChar; Delim:UnicodeString=' '):UnicodeString;
 
 var
   PictCache: tPictCache = nil;

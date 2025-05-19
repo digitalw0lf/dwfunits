@@ -14,7 +14,7 @@ uses
   System.Classes, System.SysUtils, System.IOUtils, Vcl.Controls, Vcl.Menus,
   Vcl.Forms, System.Types, Vcl.StdCtrls, Vcl.Buttons, Vcl.ExtCtrls,
   WinApi.Messages, Vcl.Graphics, Winapi.Windows, System.Math, Winapi.ShellAPI,
-  Generics.Collections, Vcl.Themes, Vcl.AppEvnts,
+  Generics.Collections, Vcl.Themes, Vcl.AppEvnts, System.StrUtils,
 
   uFormattedTextDraw;
 
@@ -106,6 +106,7 @@ type
   // main form moves or resizes
   TFormSnap = class(TComponent)
   public type
+    [ScopedEnum]
     TSnapCorner = (None, TopLeft, TopRight, BottomLeft, BottomRight);
   protected
     FForm: TForm;
@@ -132,6 +133,9 @@ type
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
     property Snapped: Boolean read GetSnapped;
+    property SnapCorner: TSnapCorner read FSnapCorner;
+    function StoreFormPos(): string;
+    function LoadFormPos(const S: string): Boolean;
   published
     property Form: TForm read FForm write SetForm;
     property SnapTo: TWinControl read FSnapTo write SetSnapTo;
@@ -1209,6 +1213,70 @@ begin
   Result := (FSnapCorner <> TSnapCorner.None);
 end;
 
+function TFormSnap.LoadFormPos(const S: string): Boolean;
+// Load form position from string
+var
+  P: PChar;
+  St:TWindowState;
+  X,Y,W,H:Integer;
+  v:Boolean;
+  R:TRect;
+  Ch:Boolean;
+  C: TSnapCorner;
+begin
+  Result := False;
+  if s='' then Exit;
+  try
+    // Parse string
+    P := @S[1];
+    if GetNextWord(P) <> 'snap' then Exit;
+    St:=tWindowState(StrToInt(GetNextWord(P)));
+    C:=TSnapCorner(StrToInt(GetNextWord(P)));
+    X:=StrToInt(GetNextWord(P));
+    Y:=StrToInt(GetNextWord(P));
+    W:=StrToInt(GetNextWord(P));
+    H:=StrToInt(GetNextWord(P));
+    v:=(StrToBool(GetNextWord(P)));
+    // Not maximized
+    if St=wsNormal then
+    begin
+      Form.WindowState:=St;
+      if Form.BorderStyle in [bsSingle,bsDialog,bsToolWindow] then
+      begin
+        W:=Form.Width;
+        H:=Form.Height;
+      end;
+      Form.SetBounds(Form.Left, Form.Top, W, H);
+      FSnapCorner := C;
+      FRelPos := Point(X, Y);
+      UpdatePosition();
+    end
+    else
+    // Maximized
+    if St=wsMaximized then
+    begin
+      if Screen.MonitorFromRect(Rect(X,Y,X+W,Y+H))<>Form.Monitor then
+        Form.SetBounds(X,Y,W,H);
+      Form.WindowState:=wsMaximized;
+    end;
+    // Show
+    if Form <> Application.MainForm then
+      Form.Visible:=v;
+    Result := True;
+  except
+    // Let it bee
+  end;
+end;
+
+function TFormSnap.StoreFormPos: string;
+// Save form position, including snap state, to string
+begin
+  Result:='snap ' + IntToStr(Ord(Form.WindowState))+' '+
+          IntToStr(Ord(SnapCorner)) + ' ' +
+          IntToStr(FRelPos.X)+' '+IntToStr(FRelPos.Y)+' '+
+          IntToStr(Form.Width)+' '+IntToStr(Form.Height)+' '+BoolToStr(Form.Visible);
+end;
+
 procedure TFormSnap.SaveRelPos;
 // Select a snap corner and save current position relative to this corner
 //const
@@ -1265,6 +1333,7 @@ begin
   begin
     // Moved outside of a main window -> unsnap
     FSnapCorner := TSnapCorner.None;
+    FRelPos := Point(Form.Left, Form.Top);
   end;
 end;
 
@@ -1315,14 +1384,29 @@ procedure TFormSnap.UpdatePosition;
 // Move our form if snap host moved or resized
 var
   ARelPos: TPoint;
+  L, T, W, H: Integer;
+  R: TRect;
+  Ch: Boolean;
 begin
   ARelPos := GetCornerPos(Form, FSnapCorner).Subtract(GetCornerPos(SnapTo, FSnapCorner));
   if (ARelPos <> FRelPos) then
   begin
     Inc(FLockUpdates);
     try
-      Form.SetBounds(Form.Left - (ARelPos.X - FRelPos.X), Form.Top - (ARelPos.Y - FRelPos.Y),
-                     Form.Width, Form.Height);
+      L := Form.Left - (ARelPos.X - FRelPos.X);
+      T := Form.Top - (ARelPos.Y - FRelPos.Y);
+      // Keep in visible screen area
+      W := Form.Width; H := Form.Height;
+      var Mon := Screen.MonitorFromRect(Rect(L, T, L+W, T+H));
+      if Mon = nil then Mon := Application.MainForm.Monitor;
+      R:=Mon.WorkareaRect;
+      Ch:=False;
+      if (L > R.Right-W)  then begin L := R.Right-W;  Ch := True; end;
+      if (L < R.Left)     then begin L := R.Left;     Ch := True; end;
+      if (T > R.Bottom-H) then begin T := R.Bottom-H; Ch := True; end;
+      if (T < R.Top)      then begin T := R.Top;      Ch := True; end;
+
+      Form.SetBounds(L, T, Form.Width, Form.Height);
       FPrevFormPos := Point(Form.Left, Form.Top);
     finally
       Dec(FLockUpdates);
