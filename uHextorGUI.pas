@@ -106,8 +106,9 @@ type
   // main form moves or resizes
   TFormSnap = class(TComponent)
   public type
-    [ScopedEnum]
+    {$SCOPEDENUMS ON}
     TSnapCorner = (None, TopLeft, TopRight, BottomLeft, BottomRight);
+    {$SCOPEDENUMS OFF}
   protected
     FForm: TForm;
 //    FFormHandle: HWND;
@@ -1220,8 +1221,6 @@ var
   St:TWindowState;
   X,Y,W,H:Integer;
   v:Boolean;
-  R:TRect;
-  Ch:Boolean;
   C: TSnapCorner;
 begin
   Result := False;
@@ -1386,7 +1385,6 @@ var
   ARelPos: TPoint;
   L, T, W, H: Integer;
   R: TRect;
-  Ch: Boolean;
 begin
   ARelPos := GetCornerPos(Form, FSnapCorner).Subtract(GetCornerPos(SnapTo, FSnapCorner));
   if (ARelPos <> FRelPos) then
@@ -1400,11 +1398,10 @@ begin
       var Mon := Screen.MonitorFromRect(Rect(L, T, L+W, T+H));
       if Mon = nil then Mon := Application.MainForm.Monitor;
       R:=Mon.WorkareaRect;
-      Ch:=False;
-      if (L > R.Right-W)  then begin L := R.Right-W;  Ch := True; end;
-      if (L < R.Left)     then begin L := R.Left;     Ch := True; end;
-      if (T > R.Bottom-H) then begin T := R.Bottom-H; Ch := True; end;
-      if (T < R.Top)      then begin T := R.Top;      Ch := True; end;
+      if (L > R.Right-W)  then begin L := R.Right-W;   end;
+      if (L < R.Left)     then begin L := R.Left;      end;
+      if (T > R.Bottom-H) then begin T := R.Bottom-H;  end;
+      if (T < R.Top)      then begin T := R.Top;       end;
 
       Form.SetBounds(L, T, Form.Width, Form.Height);
       FPrevFormPos := Point(Form.Left, Form.Top);
