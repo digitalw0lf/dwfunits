@@ -15,6 +15,7 @@ uses
   Vcl.Forms, System.Types, Vcl.StdCtrls, Vcl.Buttons, Vcl.ExtCtrls,
   WinApi.Messages, Vcl.Graphics, Winapi.Windows, System.Math, Winapi.ShellAPI,
   Generics.Collections, Vcl.Themes, Vcl.AppEvnts, System.StrUtils,
+  Generics.Defaults,
 
   uFormattedTextDraw;
 
@@ -228,6 +229,27 @@ type
     property OnScroll: TScrollEvent64 read FOnScroll write FOnScroll;
     property OnStartDock;
     property OnStartDrag;
+  end;
+
+  // Helps keeping correct visual order of several controls with the
+  // same Align property (e.g. alLeft).
+  // VCL sometimes messes it up when hiding/showing controls and splitters.
+  TCtrlOrderKeeper = class
+  protected type
+    TAlignOrder = array[TAlign] of TArray<TControl>;
+  protected
+    FOrders: TDictionary<TWinControl, TAlignOrder>;
+    function GetPos(Ctrl: TControl): Integer;
+    procedure SetPos(Ctrl: TControl; Pos: Integer);
+    function GetSize(Ctrl: TControl): Integer;
+    function GetControlOrder(AParent: TWinControl): TAlignOrder;
+  public
+    constructor Create();
+    destructor Destroy(); override;
+    procedure SaveChildAlignOrder(const AParent: TWinControl); overload;
+    procedure SaveChildAlignOrder(const AParents: array of TWinControl); overload;
+    procedure RestoreChildAlignOrder(const AParent: TWinControl); overload;
+    procedure RestoreChildAlignOrder(); overload;
   end;
 
 const
@@ -1410,6 +1432,166 @@ begin
     end;
   end;
 
+end;
+
+{ TCtrlOrderKeeper }
+
+procedure TCtrlOrderKeeper.RestoreChildAlignOrder(const AParent: TWinControl);
+
+  function SameSequence(const Saved: TArray<TControl>;
+                        const Current: TArray<TControl>): Boolean;
+  var
+    I: Integer;
+  begin
+    if Length(Saved) <> Length(Current) then Exit(False);
+    for I := 0 to High(Saved) do
+      if Saved[I] <> Current[I] then Exit(False);
+    Result := True;
+  end;
+
+  procedure Reposition(const Saved: TArray<TControl>);
+  var
+    Pos, Idx: Integer;
+    C: TControl;
+  begin
+    Pos := 0;
+
+    for Idx := 0 to High(Saved) do
+    begin
+      C := Saved[Idx];
+      if (C.Parent <> AParent) or (not C.Visible) then Continue;
+      SetPos(C, Pos);
+      Inc(Pos, GetSize(C));
+    end;
+  end;
+
+var
+  CurOrder, SavedOrder: TAlignOrder;
+  AlignKind: TAlign;
+begin
+  if not Assigned(AParent) then Exit;
+  if not FOrders.TryGetValue(AParent, SavedOrder) then Exit;
+
+  AParent.DisableAlign;
+  try
+    CurOrder := GetControlOrder(AParent);
+
+    for AlignKind in [alLeft, alRight, alTop, alBottom] do
+    begin
+      if Length(SavedOrder[AlignKind]) < 2 then Continue;
+      if SameSequence(SavedOrder[AlignKind], CurOrder[AlignKind]) then Continue; // already fine
+
+      Reposition(SavedOrder[AlignKind]);
+    end;
+  finally
+    AParent.EnableAlign;
+  end;
+end;
+
+constructor TCtrlOrderKeeper.Create;
+begin
+  inherited;
+  FOrders := TDictionary<TWinControl, TAlignOrder>.Create();
+end;
+
+destructor TCtrlOrderKeeper.Destroy;
+begin
+  FOrders.Free();
+  inherited;
+end;
+
+function TCtrlOrderKeeper.GetControlOrder(AParent: TWinControl): TAlignOrder;
+// Compute current visual order of child controls
+var
+  I: Integer;
+  C: TControl;
+  AOrder: TAlignOrder;
+
+  procedure SortByPos(var List: TArray<TControl>);
+  begin
+    TArray.Sort<TControl>(List,
+      TComparer<TControl>.Construct(function(const L, R: TControl): Integer
+      begin
+        Result := (GetPos(L) - GetPos(R));
+      end));
+  end;
+
+var
+  AlignKind: TAlign;
+begin
+  for AlignKind := Low(TAlign) to High(TAlign) do
+    AOrder[AlignKind] := nil;
+
+  if not Assigned(AParent) then Exit;
+
+  for I := 0 to AParent.ControlCount - 1 do
+  begin
+    C := AParent.Controls[I];
+    if C.Align in [alLeft, alRight, alTop, alBottom] then
+      AOrder[C.Align] := AOrder[C.Align] + [C];
+  end;
+
+  // sort each list by current coordinate
+  for AlignKind := Low(TAlign) to High(TAlign) do
+    if Length(AOrder[AlignKind]) > 1 then SortByPos(AOrder[AlignKind]);
+
+  Result := AOrder;
+end;
+
+function TCtrlOrderKeeper.GetPos(Ctrl: TControl): Integer;
+begin
+  case Ctrl.Align of
+    alLeft:   Result := Ctrl.Left;
+    alRight:  Result := Ctrl.Parent.ClientWidth - Ctrl.Left - Ctrl.Width;
+    alTop:    Result := Ctrl.Top;
+    alBottom: Result := Ctrl.Parent.ClientHeight - Ctrl.Top - Ctrl.Height;
+    else Result := 0;
+  end;
+end;
+
+function TCtrlOrderKeeper.GetSize(Ctrl: TControl): Integer;
+begin
+  case Ctrl.Align of
+    alLeft, alRight: Result := Ctrl.Width;
+    alTop, alBottom: Result := Ctrl.Height;
+    else Result := 0;
+  end;
+end;
+
+procedure TCtrlOrderKeeper.RestoreChildAlignOrder;
+var
+  Ctrl: TWinControl;
+begin
+  for Ctrl in FOrders.Keys do
+    RestoreChildAlignOrder(Ctrl);
+end;
+
+procedure TCtrlOrderKeeper.SaveChildAlignOrder(const AParent: TWinControl);
+// Save current visual order of child controls aligned to sides of given parent
+var
+  AOrder: TAlignOrder;
+begin
+  AOrder := GetControlOrder(AParent);
+  FOrders.AddOrSetValue(AParent, AOrder);
+end;
+
+procedure TCtrlOrderKeeper.SaveChildAlignOrder(
+  const AParents: array of TWinControl);
+var
+  i: Integer;
+begin
+  for i := 0 to High(AParents) do
+    SaveChildAlignOrder(AParents[i]);
+end;
+
+procedure TCtrlOrderKeeper.SetPos(Ctrl: TControl; Pos: Integer);
+begin
+  case Ctrl.Align of
+    alLeft:   Ctrl.Left := Pos;
+    alRight:  Ctrl.Left := Ctrl.Parent.ClientWidth - Pos - Ctrl.Width;
+    alTop:    Ctrl.Top := Pos;
+    alBottom: Ctrl.Top := Ctrl.Parent.ClientHeight - Pos - Ctrl.Height;
+  end;
 end;
 
 end.
