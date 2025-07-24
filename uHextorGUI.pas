@@ -235,7 +235,7 @@ type
   // same Align property (e.g. alLeft).
   // VCL sometimes messes it up when hiding/showing controls and splitters.
   TCtrlOrderKeeper = class
-  protected type
+  public type
     TAlignOrder = array[TAlign] of TArray<TControl>;
   protected
     FOrders: TDictionary<TWinControl, TAlignOrder>;
@@ -250,6 +250,7 @@ type
     procedure SaveChildAlignOrder(const AParents: array of TWinControl); overload;
     procedure RestoreChildAlignOrder(const AParent: TWinControl); overload;
     procedure RestoreChildAlignOrder(); overload;
+    property Orders: TDictionary<TWinControl, TAlignOrder> read FOrders;
   end;
 
 const
@@ -304,6 +305,7 @@ function CreateFormWithContent(Content:TWinControl; BorderStyle:TFormBorderStyle
 // необходимости добавлять в проект отдельный файл для формы
 begin
   Application.CreateForm(TForm,Result);
+  Result.ScaleForCurrentDPI();
   Result.Name:=Content.Name+'_Form';
   Result.BorderStyle:=BorderStyle;
   Content.Parent:=Result;
