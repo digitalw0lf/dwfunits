@@ -1410,6 +1410,9 @@ var
   L, T, W, H: Integer;
   R: TRect;
 begin
+  if (Form.WindowState = TWindowState.wsMinimized) or
+     (GetParentForm(SnapTo).WindowState = TWindowState.wsMinimized) then Exit;
+
   ARelPos := GetCornerPos(Form, FSnapCorner).Subtract(GetCornerPos(SnapTo, FSnapCorner));
   if (ARelPos <> FRelPos) then
   begin
