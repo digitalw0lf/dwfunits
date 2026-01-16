@@ -308,6 +308,11 @@ begin
   Result.ScaleForCurrentDPI();
   Result.Name:=Content.Name+'_Form';
   Result.BorderStyle:=BorderStyle;
+  if Content is TPanel then
+    TPanel(Content).ParentFont := False
+  else
+  if Content is TGroupBox then
+    TGroupBox(Content).ParentFont := False;
   Content.Parent:=Result;
   Content.Left:=0;
   Content.Top:=0;
