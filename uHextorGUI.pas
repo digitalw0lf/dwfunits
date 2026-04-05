@@ -78,6 +78,7 @@ type
   private
     fDropHandle: HDROP;
     FControl: TWinControl;
+    FControlHandle: HWND;  // To detect when control's handle is re-created
     FAppEvents: TApplicationEvents;
     FOnDropFiles: TDropFilesEvent;
     FFiles: TStringList;
@@ -87,6 +88,7 @@ type
     function GetPoint: TPoint;
     procedure SetControl(const Value: TWinControl);
     procedure ApplicationEventsMessage(var Msg: tagMSG; var Handled: Boolean);
+    procedure ApplicationEventsIdle(Sender: TObject; var Done: Boolean);
     procedure SetOnDropFiles(const Value: TDropFilesEvent);
     procedure Internal_Disable();
     procedure Internal_Enable();
@@ -724,6 +726,14 @@ begin
   Internal_Enable();
 end;
 
+procedure TDropFileCatcher.ApplicationEventsIdle(Sender: TObject;
+  var Done: Boolean);
+begin
+  // If control's handle is re-created, we have to re-enable the hook
+  if (FControl <> nil) and (FControl.HandleAllocated) and (FControl.Handle <> FControlHandle) then
+    Internal_Enable();
+end;
+
 procedure TDropFileCatcher.ApplicationEventsMessage(var Msg: tagMSG;
   var Handled: Boolean);
 var
@@ -757,6 +767,7 @@ begin
     FFiles := TStringList.Create();
     FAppEvents := TApplicationEvents.Create(Self);
     FAppEvents.OnMessage := ApplicationEventsMessage;
+    FAppEvents.OnIdle := ApplicationEventsIdle;
   end;
 end;
 
@@ -807,7 +818,8 @@ begin
      //(FControl.HandleAllocated) and
      (FEnabled) then
   begin
-    DragAcceptFiles(FControl.Handle, True);
+    FControlHandle := FControl.Handle;
+    DragAcceptFiles(FControlHandle, True);
   end;
 end;
 
